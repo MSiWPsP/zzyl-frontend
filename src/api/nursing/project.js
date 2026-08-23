@@ -43,9 +43,9 @@ export function delProject(id) {
   })
 }
 
-// 获取所有护理项目
-export function getProjectAll() {
-  return request({  
+//查询所有护理项目
+export function getAllProjects() {
+  return request({
     url: '/nursing/project/all',
     method: 'get'
   })

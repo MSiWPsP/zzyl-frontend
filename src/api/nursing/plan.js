@@ -35,7 +35,7 @@ export function updateNursingPlan(data) {
   })
 }
 
-// 修改护理计划
+// 修改护理计划状态
 export function planStatus(data) {
   return request({
     url: '/nursing/plan',
@@ -52,9 +52,9 @@ export function delNursingPlan(id) {
   })
 }
 
-// 获取所有护理计划
-export function getPlanAll() {
-  return request({  
+// 查询所有护理计划
+export function getAllNursingPlans() {
+  return request({
     url: '/nursing/plan/all',
     method: 'get'
   })
