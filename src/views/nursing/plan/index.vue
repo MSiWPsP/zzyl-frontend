@@ -56,7 +56,7 @@
     >
       <el-table-column label="序号" type="index" width="50" />
       <el-table-column label="名称" align="center" prop="planName" />
-      <el-table-column label="状态" align="center" prop="status">
+      <el-table-column label="状态" align="center" prop="status"> 
         <template #default="scope">
           <el-tag :type="scope.row.status === 1 ? 'success' : 'danger'">
             {{ scope.row.status === 1 ? '启用' : '禁用' }}
@@ -150,7 +150,6 @@
               <el-radio-group v-model="formData.status" :disabled="isLook">
                 <el-radio
                   v-for="dict in nursing_plan_status"
-                  :value="dict.value"
                   :label="dict.value"
                   :key="dict.value"
                   >{{ dict.label }}</el-radio
