@@ -45,7 +45,7 @@
             v-hasPermi="['nursing:level:edit']">修改</el-button>
           <el-button link type="primary" icon="Delete" @click="handleDelete(scope.row)"
             v-hasPermi="['nursing:level:remove']">删除</el-button>
-          <el-button link type="primary" :icon="scope.row.status == 0 ? 'Lock' : 'Unlock'"
+          <el-button link type="primary" :icon="scope.row.status == 0 ? 'Unlock' : 'Lock'"
             @click="handleEnable(scope.row)">{{ scope.row.status == 0 ? '启用' : '禁用' }}</el-button>
         </template>
       </el-table-column>
