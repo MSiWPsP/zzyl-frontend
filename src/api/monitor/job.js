@@ -1,5 +1,14 @@
 import request from '@/utils/request'
 
+// 校验 Cron 表达式并预览接下来的五次执行时间
+export function previewJobCron(expression) {
+  return request({
+    url: '/monitor/job/cronPreview',
+    method: 'get',
+    params: { expression }
+  })
+}
+
 // 查询定时任务调度列表
 export function listJob(query) {
   return request({

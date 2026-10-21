@@ -64,6 +64,12 @@
                 />
             </el-tab-pane>
         </el-tabs>
+        <el-alert
+            v-if="invalidExpression"
+            title="原表达式不是 6 或 7 段，请先重置再选择规则"
+            type="error"
+            :closable="false"
+        />
 
         <div class="popup-main">
             <div class="popup-result">
@@ -112,7 +118,7 @@
             <CrontabResult :ex="crontabValueString"></CrontabResult>
 
             <div class="pop_btn">
-                <el-button type="primary" @click="submitFill">确定</el-button>
+                <el-button type="primary" :disabled="!!invalidExpression" @click="submitFill">确定</el-button>
                 <el-button type="warning" @click="clearCron">重置</el-button>
                 <el-button @click="hidePopup">取消</el-button>
             </div>
@@ -129,6 +135,7 @@ import CrontabMonth from "./month.vue"
 import CrontabWeek from "./week.vue"
 import CrontabYear from "./year.vue"
 import CrontabResult from "./result.vue"
+import { previewJobCron } from '@/api/monitor/job'
 const { proxy } = getCurrentInstance()
 const emit = defineEmits(['hide', 'fill'])
 const props = defineProps({
@@ -145,6 +152,8 @@ const tabTitles = ref(["秒", "分钟", "小时", "日", "月", "周", "年"])
 const tabActive = ref(0)
 const hideComponent = ref([])
 const expression = ref('')
+const invalidExpression = ref('')
+let restoringExpression = false
 const crontabValueObj = ref({
     second: "*",
     min: "*",
@@ -176,9 +185,10 @@ function shouldHide(key) {
 function resolveExp() {
     // 反解析 表达式
     if (expression.value) {
-        const arr = expression.value.split(/\s+/)
-        if (arr.length >= 6) {
-            //6 位以上是合法表达式
+        const arr = expression.value.trim().split(/\s+/)
+        if (arr.length === 6 || arr.length === 7) {
+            invalidExpression.value = ''
+            // 回填时子组件会同步单选项，此过程不应改写原表达式
             let obj = {
                 second: arr[0],
                 min: arr[1],
@@ -188,9 +198,13 @@ function resolveExp() {
                 week: arr[5],
                 year: arr[6] ? arr[6] : ""
             }
-            crontabValueObj.value = {
-                ...obj,
-            }
+            restoringExpression = true
+            crontabValueObj.value = obj
+            nextTick(() => {
+                restoringExpression = false
+            })
+        } else {
+            invalidExpression.value = expression.value
         }
     } else {
         // 没有传入的表达式 则还原
@@ -203,7 +217,9 @@ function tabCheck(index) {
 }
 // 由子组件触发，更改表达式组成的字段值
 function updateCrontabValue(name, value, from) {
-    crontabValueObj.value[name] = value
+    if (!restoringExpression) {
+        crontabValueObj.value[name] = value
+    }
 }
 // 表单选项的子组件校验数字格式（通过-props传递）
 function checkNumber(value, minLimit, maxLimit) {
@@ -221,12 +237,26 @@ function hidePopup() {
     emit("hide")
 }
 // 填充表达式
-function submitFill() {
-    emit("fill", crontabValueString.value)
-    hidePopup()
+async function submitFill() {
+    try {
+        const response = await previewJobCron(crontabValueString.value)
+        if (!response.data.valid) {
+            proxy.$modal.msgError('Cron表达式不正确')
+            return
+        }
+        if (!response.data.times.length) {
+            proxy.$modal.msgError('Cron表达式没有后续执行时间')
+            return
+        }
+        emit("fill", crontabValueString.value)
+        hidePopup()
+    } catch (error) {
+        // 请求失败时由统一请求拦截器提示，保留弹窗供用户重试
+    }
 }
 function clearCron() {
     // 还原选择项
+    invalidExpression.value = ''
     crontabValueObj.value = {
         second: "*",
         min: "*",
