@@ -5,7 +5,11 @@
             <el-col :span="12">
                 <el-form-item label="老人姓名" prop="name">
                     <el-input v-model="formData.name" type="text" :readonly="type === 'read'" placeholder="请输入老人姓名"
-                        clearable :style="{ width: '100%' }"></el-input>
+                        clearable :style="{ width: '100%' }">
+                        <template v-if="type !== 'read'" #append>
+                            <el-button @click="elderSelectVisible = true">选择老人</el-button>
+                        </template>
+                    </el-input>
                 </el-form-item>
             </el-col>
             <el-col :span="12">
@@ -98,9 +102,24 @@
             </el-col>
 
         </el-row>
+        <OldManSelect :visible="elderSelectVisible" @close="elderSelectVisible = false" @select="selectElder" />
     </div>
 </template>
 <script setup>
+import OldManSelect from './OldManSelect.vue'
+const elderSelectVisible = ref(false)
+
+function selectElder(elder) {
+    Object.assign(formData.value, {
+        name: elder.elderName,
+        idCardNo: elder.idCard,
+        birthday: elder.birthDate,
+        age: elder.age,
+        // 健康评估为 0男/1女，老人档案为 1男/0女。
+        sex: elder.gender == null ? undefined : 1 - Number(elder.gender),
+    })
+    emit('getFormData', formData.value)
+}
 import {
     ElMessage
 }

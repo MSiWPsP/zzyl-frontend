@@ -1,4 +1,5 @@
 import request from '@/utils/request'
+import { normalizeProduct, normalizeThingModel } from '@/utils/nursingDevice'
 
 // 查询指定产品下的设备列表
 export function getDeviceList(val) {
@@ -18,7 +19,10 @@ export function listDevice(query) {
 }
 
 // 查询设备详细
-export function getDevice(data) {
+export function getDevice(data, modelType = 'legacy') {
+  if (modelType === 'services') {
+    return request({ url: '/nursing/device/' + encodeURIComponent(data.iotId), method: 'get' })
+  }
   return request({
     url: '/nursing/device/queryDeviceDetail',
     method: 'post',
@@ -26,7 +30,16 @@ export function getDevice(data) {
   })
 }
 // 详情运行状态事件管理-查看指定产品的已发布物模型中的功能定义详情
-export function getPublishedList(params) {
+export function getPublishedList(params, modelType = 'legacy') {
+  if (modelType === 'services') {
+    return request({
+      url: '/nursing/device/queryProduct/' + encodeURIComponent(params.productKey),
+      method: 'get'
+    }).then(response => ({
+      ...response,
+      data: { thingModelJson: JSON.stringify(normalizeThingModel(response.data)) }
+    }))
+  }
   return request({
     url: '/nursing/device/queryThingModelPublished',
     method: 'post',
@@ -41,6 +54,14 @@ export function getPropertyStatusList(params) {
     data:params
   })
 }
+// 查询服务模型设备上报的属性
+export function getPropertyServiceList(iotId) {
+  return request({
+    url: '/nursing/device/queryServiceProperties/' + encodeURIComponent(iotId),
+    method: 'get'
+  })
+}
+
 // 获取设备数据分页结果-查看数据
 export function getDataList(params) {
   return request({
@@ -68,7 +89,10 @@ export function updateDevice(data) {
 }
 
 // 删除设备
-export function delDevice(params) {
+export function delDevice(params, modelType = 'legacy') {
+  if (modelType === 'services') {
+    return request({ url: '/nursing/device/' + encodeURIComponent(params.iotId), method: 'delete' })
+  }
   return request({
     url: '/nursing/device',
     method: 'delete',
@@ -89,5 +113,8 @@ export function allProduct(id) {
   return request({
     url: '/nursing/device/allProduct',
     method: 'get'
-  })
+  }).then(response => ({
+    ...response,
+    data: (response.data ?? []).map(normalizeProduct)
+  }))
 }

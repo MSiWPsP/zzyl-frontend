@@ -205,12 +205,12 @@ const rules = {
   ],
 };
 // 生命周期
-onMounted(() => {
+onMounted(async () => {
+  await getProduct();
   if (route.query.id) {
     ruleId.value = route.query.id;
     getFromData();
   }
-  getProduct();
 });
 // ------定义方法------
 // 获取详情
@@ -278,7 +278,8 @@ const getPublished = async (val) => {
     ...published.value,
     productKey: val, // 产品key
   };
-  const res = await getPublishedList(params); // 获取列表数据
+  const modelType = productData.value.find(item => item.productKey === val)?.modelType;
+  const res = await getPublishedList(params, modelType); // 获取列表数据
   if (res.code === 200) {
     if (res.data !== undefined) {
       const data = JSON.parse(res.data.thingModelJson);
@@ -290,8 +291,9 @@ const getPublished = async (val) => {
       if (data.functionBlocks !== undefined) {
         itemData.value = data.functionBlocks;
       }
-      publishedData.value = data.properties;
-      itemData.value.unshift(obj);
+      const selectedModule = itemData.value.find(item => item.functionBlockId === formData.value.moduleId);
+      publishedData.value = selectedModule?.properties ?? data.properties ?? [];
+      if (modelType !== 'services') itemData.value.unshift(obj);
     }
   }
 };
@@ -324,18 +326,29 @@ const handleProduct = (val, e) => {
     delete formData.value.functionId;
     // form.value.clearValidate(['moduleId', 'iotId', 'functionId'])
   });
-  const arr = productData.value.filter((item) => item.productKey === val);
-  formData.value.productName = arr[0].productName;
+  const product = productData.value.find(item => item.productKey === val);
+  formData.value.productName = product?.productName;
   formData.value.productKey = val;
+  itemData.value = [];
+  publishedData.value = [];
+  listData.value = [];
+  published.value = {};
+  if (!product) return;
   getPublished(val);
   getList(val);
 };
 // 触发模块
-const handleModele = (val, e) => {
-  formData.value.moduleName = '默认模块';
+const handleModele = (val) => {
+  const selectedModule = itemData.value.find(item => item.functionBlockId === val);
+  formData.value.moduleName = selectedModule?.functionBlockName ?? '默认模块';
+  delete formData.value.functionId;
+  if (selectedModule?.properties) {
+    publishedData.value = selectedModule.properties;
+    return;
+  }
   // 如果选择的是自定义模块需要传functionBlockId
   if (val !== '-1') {
-    published.value.functionBlockId = e.selectedOptions[0].value;
+    published.value.functionBlockId = val;
   } else {
     // 否则删除functionBlockId，显示默认模块的数据
     delete published.value.functionBlockId;
@@ -345,13 +358,13 @@ const handleModele = (val, e) => {
 // 触发功能
 const handleIdentifier = (val, e) => {
   const arr = publishedData.value.filter((item) => item.identifier === val);
-  formData.value.functionName = arr[0].name;
+  formData.value.functionName = arr[0]?.name;
 };
 
 // 触发设备
 const handleDevice = (val) => {
   const arr = listData.value.filter((item) => item.iotId === val);
-  formData.value.deviceName = arr[0].deviceName;
+  formData.value.deviceName = arr[0]?.deviceName;
 };
 // 触发沉默周期
 const handlePeriod = (val) => {

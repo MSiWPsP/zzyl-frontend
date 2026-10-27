@@ -73,7 +73,7 @@
             <el-upload ref="pdfUrl" v-model:file-list="pdfUrlfileList" :action="pdfUrlAction" :headers="headers"
               :data="{ idCardNo: form.idCard }" accept=".pdf" :limit="1" :auto-upload="true" :multiple="false"
               :on-success="handleSuccess" :on-remove="() => handleRemove()" :before-upload="pdfUrlBeforeUpload"
-              :on-exceed="handleExceed">
+              :on-exceed="handleExceed" :disabled="!canUpload || reportUploading" :on-error="handleUploadError">
               <el-button size="small" type="primary">点击上传</el-button>
               <template #tip>
                 <span class="fontCol">请上传pdf文件，大小在60M以内</span>
@@ -94,7 +94,7 @@
       </div>
       <template #footer>
         <div class="dialog-footer">
-          <el-button type="primary" @click="submitForm">确 定</el-button>
+          <el-button type="primary" :disabled="!form.physicalReportUrl || reportUploading" :loading="updateLoading" @click="submitForm">确 定</el-button>
           <el-button @click="cancel">取 消</el-button>
         </div>
       </template>
@@ -104,7 +104,6 @@
 </template>
 
 <script setup name="HealthAssessment">
-import { genFileId } from 'element-plus';
 import {
   listHealthAssessment,
   getHealthAssessment,
@@ -127,7 +126,7 @@ const multiple = ref(true);
 const total = ref(0);
 const title = ref('');
 // 上传请求路径
-const pdfUrlAction = ref('/dev-api/nursing/healthAssessment/upload');
+const pdfUrlAction = ref(import.meta.env.VITE_APP_BASE_API + '/nursing/healthAssessment/upload');
 const headers = {
   Authorization: 'Bearer ' + getToken(),
 };
@@ -136,6 +135,8 @@ const updateLoading = ref(false); //图片上传中
 const formRef = ref();
 const pdfUrlfileList = ref([]);
 const pdfUrl = ref(null);
+const reportUploading = ref(false);
+let uploadedIdCard = null;
 const data = reactive({
   form: {},
   queryParams: {
@@ -179,6 +180,13 @@ const data = reactive({
 });
 
 const { queryParams, form, rules } = toRefs(data);
+const canUpload = computed(() => [form.value.elderName, form.value.idCard, form.value.physicalExamInstitution]
+  .every(value => String(value ?? '').trim()));
+
+watch(() => form.value.idCard, () => {
+  form.value.physicalReportUrl = null;
+  pdfUrlfileList.value = [];
+});
 
 /** 查询健康评估列表 */
 function getList() {
@@ -192,6 +200,8 @@ function getList() {
 
 // 取消按钮
 function cancel() {
+  pdfUrl.value?.abort();
+  reportUploading.value = false;
   open.value = false;
   updateLoading.value = false;
   reset();
@@ -244,22 +254,36 @@ function handleUpdate(row) {
 }
 
 // 上传之前的文件判断，判断文件大小文件类型等
-const pdfUrlBeforeUpload = (file) => {
+const pdfUrlBeforeUpload = async (file) => {
+  if (!canUpload.value || !await formRef.value.validateField(['elderName', 'idCard', 'physicalExamInstitution']).catch(() => false)) {
+    return false;
+  }
+  if (!/\.pdf$/i.test(file.name)) {
+    proxy.$modal.msgError('请上传 PDF 文件');
+    return false;
+  }
   // 校检文件大小
   const isLt = file.size / 1024 / 1024 < 60;
   if (!isLt) {
     proxy.$modal.msgError(`文件大小超过60m，请重新上传!`);
     return false;
   }
+  uploadedIdCard = form.value.idCard;
+  reportUploading.value = true;
+  return true;
 };
-const handleExceed = (files) => {
-  pdfUrl.value.clearFiles();
-  const file = files[0];
-  file.uid = genFileId();
-  pdfUrl.value.handleStart(file);
+const handleExceed = () => {
+  proxy.$modal.msgError('请先移除已上传报告，再选择新文件');
 };
 //上传文件成功的处理
 const handleSuccess = (res) => {
+  reportUploading.value = false;
+  if (res.code !== 200 || !res.url || uploadedIdCard !== form.value.idCard) {
+    form.value.physicalReportUrl = null;
+    pdfUrlfileList.value = [];
+    proxy.$modal.msgError(res.msg || '上传失败或身份证已变更，请重新上传');
+    return;
+  }
   form.value.physicalReportUrl = res.url;
   formRef.value.validateField('physicalReportUrl');
 };
@@ -268,19 +292,30 @@ const handleSuccess = (res) => {
 const handleRemove = () => {
   form.value.physicalReportUrl = '';
 };
+const handleUploadError = () => {
+  reportUploading.value = false;
+  form.value.physicalReportUrl = null;
+  pdfUrlfileList.value = [];
+  proxy.$modal.msgError('报告上传失败，请重试');
+};
 /** 提交按钮 */
 function submitForm() {
+  if (reportUploading.value || updateLoading.value) return;
   formRef.value.validate(async (valid) => {
     if (!valid) return;
     updateLoading.value = true;
-    const res = await addHealthAssessment(form.value);
-    if (res.code === 200) {
-      proxy.$modal.msgSuccess(`操作成功`);
-      cancel();
-      proxy.$router.push({
-        path: '/enterQuit/healthDetails',
-        query: { id: res.data },
-      });
+    try {
+      const res = await addHealthAssessment(form.value);
+      if (res.code === 200) {
+        proxy.$modal.msgSuccess(`操作成功`);
+        cancel();
+        proxy.$router.push({
+          path: '/enterQuit/healthDetails',
+          query: { id: res.data },
+        });
+      }
+    } finally {
+      updateLoading.value = false;
     }
   });
 }

@@ -173,6 +173,7 @@ import {
   baoJingStatus
 } from '../constants'
 import useUserStore from '@/store/modules/user'
+import { normalizeBedProperties } from '@/utils/nursingDevice'
 import NoData from '@/components/noData/index.vue' // 无数据提示组件
 
 // 获取父组件值、方法
@@ -201,7 +202,7 @@ const getRoomWuData = (item) => {
       return []
     })
   }
-  return getSameRoomData(wuDataList, wuList)
+  return getSameRoomData(wuDataList, normalizeBedProperties(wuList))
 }
 // 根据物模型的key返回对应的文字状态值
 const getWuKdyVal = (item) => {

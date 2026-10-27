@@ -3,11 +3,14 @@ import request from '@/utils/request'
 //查询老人列表
 export function listElderPageQuery (query) {
   return request({
-    url: '/nursing/elder/pageQuery',
+    url: '/nursing/elder/list',
     method: 'get',
     params: query
   })
 }
+
+// 复用健康评估列表，供入住时选择已评估老人。
+export { listHealthAssessment as healthPageQuery } from './healthAssessment'
 
 //申请入住
 export function applyCheckIn (data) {

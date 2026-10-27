@@ -14,7 +14,15 @@
           </div>
           <div class="info-item">
             <h1 class="label-wt">DeviceSecret：</h1>
-            <span>{{ baseData.deviceSecret }} </span>
+            <span>{{ baseData.deviceSecret ?? baseData.secret }} </span>
+          </div>
+          <div v-if="baseData.nodeId" class="info-item">
+            <h1 class="label-wt">设备标识码：</h1>
+            <span>{{ baseData.nodeId }}</span>
+          </div>
+          <div v-if="baseData.iotId" class="info-item">
+            <h1 class="label-wt">设备ID：</h1>
+            <span>{{ baseData.iotId }}</span>
           </div>
           <div class="info-item">
             <h1 class="label-wt">ProductKey：</h1>
@@ -22,9 +30,10 @@
           </div>
           <div class="info-item">
             <h1 class="label-wt">设备状态：</h1>
-            <span><span v-if="baseData.status === 'ONLINE'" class="bt-small">在线</span>
-              <span v-else-if="baseData.status === 'OFFLINE'" class="undefinedBtn">离线</span>
-              <span v-else-if="baseData.status === 'UNACTIVE'" class="undefinedBtn">未激活</span>
+            <span><span v-if="deviceStatus === 'ONLINE'" class="bt-small">在线</span>
+              <span v-else-if="deviceStatus === 'OFFLINE'" class="undefinedBtn">离线</span>
+              <span v-else-if="deviceStatus === 'ABNORMAL'" class="undefinedBtn">异常</span>
+              <span v-else-if="['UNACTIVE', 'INACTIVE'].includes(deviceStatus)" class="undefinedBtn">未激活</span>
               <span v-else class="forbidBtn">已禁用</span></span>
           </div>
           <div class="info-item">
@@ -91,11 +100,11 @@
             </div>
             <div class="info-item">
               <h1>创建时间：</h1>
-              <span>{{ baseData.gmtCreate }}</span>
+              <span>{{ baseData.gmtCreate ?? baseData.createTime }}</span>
             </div>
             <div class="info-item">
               <h1>激活时间：</h1>
-              <span>{{ baseData.gmtActive ? baseData.gmtActive : '--' }}</span>
+              <span>{{ baseData.gmtActive || baseData.activeTime || '--' }}</span>
             </div>
           </div>
         </el-card>
@@ -120,7 +129,7 @@
             </div>
           </div>
           <div class="modelR">
-            <el-table v-loading="loading" :data="publishedData" @selection-change="onPageChange">
+            <el-table v-loading="dataLoading" :data="publishedData" @selection-change="onPageChange">
               <el-table-column label="序号" type="index" align="center" width="55" />
               <el-table-column label="标识符" align="center" prop="identifier" width="180" />
               <el-table-column label="功能名称" align="center" prop="name" width="180" />
@@ -145,7 +154,7 @@
             </el-table>
 
             <pagination v-show="pagination.total > 0" :total="pagination.total" v-model:page="pagination.pageNum"
-              v-model:limit="pagination.pageSize" @pagination="getPropertyStatus" />
+              v-model:limit="pagination.pageSize" @pagination="getPropertyStatus(baseData)" />
           </div>
         </div>
       </div>
@@ -168,8 +177,10 @@ import {
   getDevice,
   getPublishedList,
   getPropertyStatusList,
+  getPropertyServiceList,
   getDataList,
 } from '@/api/nursing/device';
+import { normalizeDeviceProperties } from '@/utils/nursingDevice';
 // tab切换
 import SwitchBar from '@/components/switchBar/switchBartop.vue';
 import SwitchTabBar from '@/components/switchBar/switchBar.vue';
@@ -177,6 +188,8 @@ import SwitchTabBar from '@/components/switchBar/switchBar.vue';
 import LookData from './components/runLookData.vue';
 // ------定义变量------
 const route = useRoute(); // 获取局部
+const modelType = computed(() => route.query.modelType === 'services' ? 'services' : 'legacy');
+const deviceStatus = computed(() => baseData.value.deviceStatus ?? baseData.value.status);
 const router = useRouter(); // 获取全局
 const iotId = ref(''); // 设备id
 const productKey = ref(''); // 产品key
@@ -236,7 +249,7 @@ const getDetails = async () => {
     iotId: iotId.value,
     productKey: productKey.value,
   };
-  const res = await getDevice(params); // 获取列表数据
+  const res = await getDevice(params, modelType.value); // 获取列表数据
   if (res.code === 200) {
     baseData.value = res.data;
     paginationLook.value.deviceId = baseData.value.iotId;
@@ -252,26 +265,36 @@ const getPublished = async (val) => {
   const params = {
     productKey: productKey.value, // 产品key
   };
+  if (modelType.value === 'services') {
+    itemData.value = [];
+    await getPropertyStatus(val);
+    return;
+  }
   const res = await getPublishedList(params); // 获取列表数据
   if (res.code === 200) {
     const data = JSON.parse(res.data.thingModelJson);
-    itemData.value = data.functionBlocks;
+    itemData.value = data.functionBlocks ?? [];
     // 获取运行状态的接口
     getPropertyStatus(val);
   }
 };
 // 详情运行状态状态的卡片
-const getPropertyStatus = async (basedata) => {
-  statusObj.value = {
-    ...statusObj.value,
-    deviceName: basedata.deviceName,
-    productKey: productKey.value,
-  };
-  const res = await getPropertyStatusList(statusObj.value); // 获取列表数据
-  if (res.code === 200) {
-    const data = res.data.list.propertyStatusInfo;
-    publishedData.value = data;
-  }
+const getPropertyStatus = async (basedata = baseData.value) => {
+  dataLoading.value = true;
+  try {
+    statusObj.value = {
+      ...statusObj.value,
+      deviceName: basedata.deviceName,
+      productKey: productKey.value,
+    };
+    const res = modelType.value === 'services'
+      ? await getPropertyServiceList(basedata.iotId)
+      : await getPropertyStatusList(statusObj.value);
+    if (res.code === 200) {
+      const data = modelType.value === 'services' ? res.data : res.data.list.propertyStatusInfo;
+      publishedData.value = normalizeDeviceProperties(data);
+    }
+  } finally { dataLoading.value = false; }
 };
 // 获取运行状态列表的查看数据
 const getLookList = async (val) => {

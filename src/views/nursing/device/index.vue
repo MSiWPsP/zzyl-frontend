@@ -70,7 +70,10 @@
             class="wt-400" :disabled="formData.id && formData.id !== undefined && formData.id !== ''
               "></el-input>
         </el-form-item>
-        <el-form-item label="备注名称：" prop="nickname">
+        <el-form-item v-if="isServiceProduct" label="设备标识码：" prop="nodeId">
+          <el-input v-model="formData.nodeId" placeholder="请输入设备标识码" class="wt-400" :disabled="!!formData.id" />
+        </el-form-item>
+        <el-form-item v-else label="备注名称：" prop="nickname">
           <el-input v-model="formData.nickname" placeholder="请输入" :maxlength="15" show-word-limit clearable
             class="wt-400"></el-input>
         </el-form-item>
@@ -190,9 +193,10 @@ const rules = {
       trigger: 'blur',
     },
     {
-      pattern: /^[^\u4e00-\u9fa5]{4,15}$/g,
-      message:
-        '支持英文字母、数字、下划线（_）、中划线（-）、点号（.）、半角冒号（:）和特殊字符@，长度限制为4~32个字符',
+      validator: (_rule, value, callback) => {
+        callback(isServiceProduct.value || /^[^\u4e00-\u9fa5]{4,15}$/.test(value)
+          ? undefined : new Error('设备名称需为4~15个非中文字符'));
+      },
       trigger: 'blur',
     },
   ],
@@ -203,6 +207,7 @@ const rules = {
       trigger: 'blur',
     },
   ],
+  nodeId: [{ required: true, message: '请输入设备标识码', trigger: 'blur' }],
   productKey: [
     {
       required: true,
@@ -228,6 +233,9 @@ const rules = {
 const { queryParams } = toRefs(data);
 //产品列表
 const options = ref([]);
+const productModelType = productKey => options.value.find(item => item.productKey === productKey)?.modelType ?? 'legacy';
+const deviceModelType = row => row.nodeId != null ? 'services' : productModelType(row.productKey);
+const isServiceProduct = computed(() => productModelType(formData.value.productKey) === 'services');
 
 //组件挂载完成，自动同步产品列表
 onMounted(() => {
@@ -317,6 +325,7 @@ function cancel() {
 
 // 表单重置
 function reset() {
+  formOldData.value = {};
   formData.value = {
     id: null,
     iotId: null,
@@ -324,6 +333,7 @@ function reset() {
     locationType: 0,
     physicalLocationType: null,
     deviceName: null,
+    nodeId: null,
     nickname: null,
     productKey: null,
     productName: null,
@@ -391,7 +401,7 @@ function handleUpdate(row) {
     iotId: row.iotId,
     productKey: row.productKey,
   };
-  getDevice(params).then((response) => {
+  getDevice(params, deviceModelType(row)).then((response) => {
     const data = response.data;
     formData.value = data;
 
@@ -425,6 +435,11 @@ function submitForm() {
           productKey: data.productKey,
         },
       };
+      if (isServiceProduct.value) {
+        params.nodeId = data.nodeId;
+        delete params.nickname;
+        delete params.registerDeviceRequest;
+      }
       // 如果选择的接入类别是1，需要传楼层房间id
       if (data.locationType === 1) {
         params = {
@@ -475,7 +490,7 @@ function handleDelete(row) {
         iotId: row.iotId,
         productKey: row.productKey,
       };
-      delDevice(params)
+      return delDevice(params, deviceModelType(row))
     })
     .then(() => {
       setTime()
@@ -579,7 +594,7 @@ const handleRadio = (value) => {
 const handleDetails = (row) => {
   router.push({
     path: '/intelligence/details',
-    query: { iotId: row.iotId, productKey: row.productKey },
+    query: { iotId: row.iotId, productKey: row.productKey, modelType: deviceModelType(row) },
   });
 };
 

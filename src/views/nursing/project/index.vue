@@ -86,7 +86,7 @@
         </el-form-item>
         <el-form-item label="状态" prop="status">
           <el-radio-group v-model="form.status">
-            <el-radio v-for="(nps, index) in nursing_project_status" :key="index" :value="nps.value">{{ nps.label}}</el-radio>
+            <el-radio v-for="(nps, index) in nursing_project_status" :key="index" :label="nps.value">{{ nps.label}}</el-radio>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="图片" prop="image">

@@ -136,7 +136,7 @@
                         <el-radio
                            v-for="dict in sys_notice_status"
                            :key="dict.value"
-                           :value="dict.value"
+                           :label="dict.value"
                         >{{ dict.label }}</el-radio>
                      </el-radio-group>
                   </el-form-item>
