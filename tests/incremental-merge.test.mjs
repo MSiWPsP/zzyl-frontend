@@ -4,6 +4,9 @@ import fs from 'node:fs'
 import { babelParse as parse, parse as parseSfc, compileScript, compileTemplate } from '@vue/compiler-sfc'
 import * as vue from 'vue'
 import * as deviceHelpers from '../src/utils/nursingDevice.js'
+import asyncValidator from 'async-validator'
+
+const Schema = asyncValidator.default ?? asyncValidator
 
 const read = path => fs.readFileSync(new URL('../' + path, import.meta.url), 'utf8')
 const flush = async () => { await vue.nextTick(); await new Promise(resolve => setImmediate(resolve)) }
@@ -199,36 +202,179 @@ test('reservation range/tab reset, arrival transition and import failure recover
   fixture.stop()
 })
 
-test('device registration preserves legacy payloads and adds node IDs only for service products', async () => {
+function deviceFixture(overrides = {}) {
   const registrations = []
   const fixture = setup('src/views/nursing/device/index.vue', {
     '@/api/nursing/device': { listDevice: ok, getDevice: ok, delDevice: ok,
       addDevice: async data => { registrations.push(data); return { code: 200 } },
-      updateDevice: ok, syncProductList: ok, allProduct: ok },
+      updateDevice: ok, syncProductList: ok, allProduct: ok, ...overrides },
     '@/api/nursing/checkIn': { listElderPageQuery: ok }, '@/api/nursing/floor': { getFloorBed: ok },
     '@/utils/commonData': { locationTypeOptions: [] },
   }, {}, { useRouter: () => ({ push() {} }) })
-  proxy.$refs.deviceRef = { validate: callback => callback(true) }
   const s = fixture.state
-  s.options.value = [
-    deviceHelpers.normalizeProduct({ productKey: 'old', productName: 'Original' }),
-    deviceHelpers.normalizeProduct({ productId: 'new', name: 'New' }),
-  ]
-  s.formData.value = { deviceName: 'device', nickname: 'note', productKey: 'old', locationType: 0, elderId: 1, name: '甲' }
+  s.reset()
+  s.options.value = [deviceHelpers.normalizeProduct({ productId: 'p1', name: 'Product' })]
+  Object.assign(s.formData.value, { deviceName: '中文设备', nodeId: 'node1', productKey: 'p1' })
+  // Element Plus removes trigger before passing each mounted field's rules to async-validator.
+  proxy.$refs.deviceRef = {
+    clearValidate() {},
+    validate: async () => {
+      const fields = ['deviceName', 'nodeId', 'productKey', 'locationType', 'bindingLocation']
+      const rules = Object.fromEntries(fields.map(key => [key, s.rules[key].map(({ trigger, ...rule }) => rule)]))
+      await new Schema(rules).validate(s.formData.value)
+      return true
+    },
+  }
+  return { ...fixture, registrations }
+}
+
+test('wearable registration follows the documented sentinel and elder ID description', async () => {
+  const fixture = deviceFixture()
+  const s = fixture.state
+  s.handleSelectOld({ id: 2, name: '乙' })
+  await s.submitForm()
+  assert.deepEqual(fixture.registrations[0], {
+    deviceName: '中文设备', nodeId: 'node1', productKey: 'p1', productName: 'Product',
+    locationType: 0, bindingLocation: '2', physicalLocationType: -1, deviceDescription: '2', remark: '乙',
+  })
+  assert.equal(fixture.events.length, 0)
+  fixture.stop()
+})
+
+test('device registration blocks missing locations and whitespace node IDs', async () => {
+  const fixture = deviceFixture()
+  const s = fixture.state
+  await s.submitForm()
+  s.formData.value.locationType = 1
+  s.handleRadio()
+  await s.submitForm()
+  assert.equal(fixture.registrations.length, 0)
+  s.formData.value.locationType = 0
+  s.handleSelectOld({ id: 1, name: '甲' })
+  s.formData.value.nodeId = '   '
+  await s.submitForm()
+  assert.equal(fixture.registrations.length, 0)
+  assert.equal(s.submitting.value, false)
+  s.formData.value.nodeId = 'n'.repeat(51)
+  await s.submitForm()
+  s.formData.value.nodeId = 'node1'
+  s.formData.value.deviceName = '名'.repeat(101)
+  await s.submitForm()
+  assert.equal(fixture.registrations.length, 0)
+  fixture.stop()
+})
+
+test('device floor room and bed bindings retain full IDs and survive type switches', async () => {
+  const fixture = deviceFixture()
+  const s = fixture.state
+  s.floorData.value = [{ value: '12', label: '二楼', children: [
+    { value: '34', label: '201', children: [{ value: '56', label: '1床' }] },
+  ] }]
+  s.handleSelectOld({ id: 9, name: '甲' })
+  s.formData.value.locationType = 1
+  s.handleRadio()
+  const path = ['12', '34', '56']
+  for (let depth = 1; depth <= 3; depth++) {
+    s.bedValue.value = path.slice(0, depth)
+    s.handleFloor()
+    await s.submitForm()
+    const body = fixture.registrations.at(-1)
+    assert.equal(body.bindingLocation, path[depth - 1])
+    assert.equal(body.physicalLocationType, depth - 1)
+    assert.equal(body.deviceDescription, path.slice(0, depth).join(','))
+  }
+  s.formData.value.locationType = 0
+  s.handleRadio()
+  await s.submitForm()
+  assert.equal(fixture.registrations.at(-1).bindingLocation, '9')
+  assert.equal(fixture.registrations.at(-1).remark, '甲')
+  assert.equal(fixture.registrations.at(-1).physicalLocationType, -1)
+  assert.equal(fixture.registrations.at(-1).deviceDescription, '9')
+  s.formData.value.locationType = 1
+  s.handleRadio()
+  assert.equal(s.formData.value.bindingLocation, '56')
+  assert.equal(s.formData.value.remark, '二楼,201,1床')
+  s.bedValue.value = null
+  s.handleFloor()
+  await s.submitForm()
+  assert.equal(fixture.registrations.length, 4)
+  s.reset()
+  assert.equal(s.selectedElder.value, null)
+  assert.deepEqual(s.bedValue.value, [])
+  fixture.stop()
+})
+
+test('device submit prevents concurrent requests and releases the button after failure', async () => {
+  let rejectRequest
+  let count = 0
+  const fixture = deviceFixture({ addDevice: () => { count++; return new Promise((_resolve, reject) => { rejectRequest = reject }) } })
+  const s = fixture.state
+  s.handleSelectOld({ id: 1, name: '甲' })
+  const first = s.submitForm()
   await flush()
-  s.submitForm()
-  assert.equal(registrations[0].registerDeviceRequest.productKey, 'old')
-  assert.equal(registrations[0].nickname, 'note')
-  assert.equal(registrations[0].bindingLocation, 1)
-  s.formData.value = { deviceName: '设备', nodeId: 'node1', productKey: 'new', locationType: 0, elderId: 2, name: '乙' }
+  await s.submitForm()
+  assert.equal(count, 1)
+  rejectRequest(new Error('fixture failure'))
+  await first
+  assert.equal(s.submitting.value, false)
+  assert.equal(s.formData.value.bindingLocation, '1')
+  fixture.stop()
+})
+
+test('smoke and sleep registrations use the selected room or bed ID and full numeric paths', async () => {
+  const fixture = deviceFixture()
+  const s = fixture.state
+  // The same ID may exist at multiple levels. Do not strip digits or add UI prefixes to the request.
+  s.floorData.value = [{ value: '1', label: '1楼', children: [{ value: '1', label: '101', children: [
+    { value: '5', label: '101-1' },
+  ] }] }]
+  s.formData.value.locationType = 1
+  s.formData.value.deviceName = '烟雾01'
+  s.formData.value.nodeId = 'yw01'
+  s.bedValue.value = ['1', '1']
+  s.handleFloor()
+  await s.submitForm()
+  assert.deepEqual(fixture.registrations.at(-1), {
+    deviceName: '烟雾01', nodeId: 'yw01', productKey: 'p1', productName: 'Product',
+    locationType: 1, bindingLocation: '1', physicalLocationType: 1, deviceDescription: '1,1', remark: '1楼,101',
+  })
+  s.formData.value.deviceName = '睡眠检测带01'
+  s.formData.value.nodeId = 'sm01'
+  s.bedValue.value = ['1', '1', '5']
+  s.handleFloor()
+  await s.submitForm()
+  assert.deepEqual(fixture.registrations.at(-1), {
+    deviceName: '睡眠检测带01', nodeId: 'sm01', productKey: 'p1', productName: 'Product',
+    locationType: 1, bindingLocation: '5', physicalLocationType: 2, deviceDescription: '1,1,5', remark: '1楼,101,101-1',
+  })
+  fixture.stop()
+})
+
+test('device elder selector restores confirmed data after cancel and clears selection for searches/pages', async () => {
+  const props = vue.reactive({ dialogVisible: false, dialogData: [], pagination: {}, dataLoading: false,
+    formData: { bindingLocation: 11, remark: '甲' } })
+  const fixture = setup('src/views/nursing/device/components/LookData.vue', {}, props)
+  const s = fixture.state
+  props.dialogVisible = true
   await flush()
-  s.submitForm()
-  assert.equal(registrations[1].nodeId, 'node1')
-  assert.equal(registrations[1].productKey, 'new')
-  assert.equal(registrations[1].productName, 'New')
-  assert.equal('registerDeviceRequest' in registrations[1], false)
-  assert.equal('nickname' in registrations[1], false)
+  s.chooseone({ id: 22, name: '乙' })
+  s.handleClose()
+  props.dialogVisible = false
   await flush()
+  props.dialogVisible = true
+  await flush()
+  s.handleSub()
+  assert.deepEqual(fixture.events.find(event => event[0] === 'handleSelectOld'), ['handleSelectOld', { id: 11, name: '甲' }])
+  s.chooseone({ id: 22, name: '乙' })
+  s.handleSearch()
+  assert.equal(s.selected.value, null)
+  s.chooseone({ id: 22, name: '乙' })
+  s.getList({ page: 2, limit: 5 })
+  assert.equal(s.selected.value, null)
+  s.chooseone({ id: 22, name: '乙' })
+  props.dataLoading = true
+  s.handleSub()
+  assert.equal(fixture.events.filter(event => event[0] === 'handleSelectOld').length, 1)
   fixture.stop()
 })
 

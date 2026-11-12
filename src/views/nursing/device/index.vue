@@ -34,7 +34,7 @@
     <el-table v-loading="loading" :data="deviceList" @selection-change="handleSelectionChange">
       <el-table-column label="序号" type="index" align="center" width="55" />
       <el-table-column label="设备名称" align="center" prop="deviceName" width="180" />
-      <el-table-column label="备注名称" align="center" prop="nickname" width="180" />
+      <el-table-column label="设备标识码" align="center" prop="nodeId" width="180" />
       <el-table-column label="产品名称" align="center" prop="productName" width="150" />
       <el-table-column label="接入位置" align="center" prop="remark" width="180" />
       <el-table-column label="设备类型" align="center" prop="locationType" width="180">
@@ -64,18 +64,14 @@
 
     <!-- 添加或修改设备对话框 -->
     <el-dialog :title="title" v-model="open" class="elDialogBox" append-to-body>
-      <el-form ref="deviceRef" :model="formData" :rules="rules" label-width="100px">
+      <el-form ref="deviceRef" :model="formData" :rules="rules" label-width="120px" class="device-form">
         <el-form-item label="设备名称：" prop="deviceName">
-          <el-input v-model="formData.deviceName" placeholder="请输入" :maxlength="15" show-word-limit clearable
+          <el-input v-model.trim="formData.deviceName" placeholder="请输入设备名称" maxlength="100" show-word-limit clearable
             class="wt-400" :disabled="formData.id && formData.id !== undefined && formData.id !== ''
               "></el-input>
         </el-form-item>
-        <el-form-item v-if="isServiceProduct" label="设备标识码：" prop="nodeId">
-          <el-input v-model="formData.nodeId" placeholder="请输入设备标识码" class="wt-400" :disabled="!!formData.id" />
-        </el-form-item>
-        <el-form-item v-else label="备注名称：" prop="nickname">
-          <el-input v-model="formData.nickname" placeholder="请输入" :maxlength="15" show-word-limit clearable
-            class="wt-400"></el-input>
+        <el-form-item label="设备标识码：" prop="nodeId">
+          <el-input v-model.trim="formData.nodeId" placeholder="请输入 IMEI、MAC 地址或序列号" maxlength="50" show-word-limit class="wt-400" :disabled="!!formData.id" />
         </el-form-item>
         <el-form-item label="所属产品：" prop="productKey">
           <el-select v-model="formData.productKey" placeholder="请选择" clearable class="wt-400" :disabled="formData.id && formData.id !== undefined && formData.id !== ''
@@ -85,16 +81,15 @@
           </el-select>
         </el-form-item>
         <el-form-item label="设备类型：" prop="locationType">
-          <el-radio-group v-model="formData.locationType" size="medium" @change="handleRadio">
+          <el-radio-group v-model="formData.locationType" @change="handleRadio">
             <el-radio v-for="(item, index) in locationTypeOptions" :key="index" :label="item.id">{{ item.value
               }}</el-radio>
           </el-radio-group>
         </el-form-item>
-        <el-form-item v-if="formData.locationType === 0" label="接入位置：" prop="name">
-          <el-input v-model="formData.name" placeholder="请选择" :readonly="readonly" @focus="selectFlavor"
-            @blur="outSelect" class="wt-400">
+        <el-form-item v-if="formData.locationType === 0" label="接入位置：" prop="bindingLocation">
+          <el-input :model-value="formData.remark" placeholder="请选择老人" readonly @click="selectFlavor" class="wt-400">
             <template #suffix>
-              <el-icon v-if="mak">
+              <el-icon v-if="dialogOldVisible">
                 <ArrowUp />
               </el-icon>
               <el-icon v-else>
@@ -103,14 +98,14 @@
             </template>
           </el-input>
         </el-form-item>
-        <el-form-item v-else label="接入位置：" prop="localName">
+        <el-form-item v-else label="接入位置：" prop="bindingLocation">
           <el-cascader v-model="bedValue" :options="floorData" :props="{ checkStrictly: true }" @change="handleFloor"
-            class="wt-400" />
+            clearable class="wt-400" />
         </el-form-item>
       </el-form>
       <template #footer>
         <div class="dialog-footer">
-          <el-button type="primary" @click="submitForm">确 定</el-button>
+          <el-button type="primary" :loading="submitting" @click="submitForm">确 定</el-button>
           <el-button @click="cancel">取 消</el-button>
         </div>
       </template>
@@ -118,7 +113,7 @@
     <!-- 选择老人弹窗 -->
     <!-- 老人选择弹层 -->
     <OldManSelect :dialog-visible="dialogOldVisible" :dialog-data="listOldManData" :pagination="paginationOld"
-      :formData="formData" @handle-search="handleOldSearch" @handle-reset="handleOldReset"
+      :formData="formData" :data-loading="oldLoading" @handle-search="handleOldSearch" @handle-reset="handleOldReset"
       @handle-close-dialog="handleCloseDialog" @get-current="getOldCurrent" @handle-select-old="handleSelectOld"
       @get-old-list="getOldList"></OldManSelect>
     <!-- end -->
@@ -146,6 +141,7 @@ const router = useRouter();
 const deviceList = ref([]);
 const open = ref(false);
 const loading = ref(true);
+const submitting = ref(false);
 const showSearch = ref(true);
 const ids = ref([]);
 const single = ref(true);
@@ -157,7 +153,6 @@ const queryRef = ref(null)
 const { device_location_type } = proxy.useDict('device_location_type');
 const formData = ref({
   locationType: 0,
-  resource: '',
 });
 const data = reactive({
   queryParams: {
@@ -169,16 +164,13 @@ const data = reactive({
     productName: null,
   },
 });
-const mak = ref(false); // 控制input上下箭头
-const formVisible = ref(false); // 弹窗
-const readonly = ref(false); // 是否只读
 const dialogOldVisible = ref(false); // 老人选择弹窗
 const listOldManData = ref([]); // 获取所有老人
-const oldManInfo = ref({}); // 选择的老人数据数据
+const oldLoading = ref(false);
+let oldRequestId = 0;
+const selectedElder = ref(null);
 const floorData = ref([]); // 楼层信息
-const productData = ref([]); // 产品数据
 const bedValue = ref([]);
-const formOldData = ref({});
 // 老人弹层分页
 const paginationOld = ref({
   pageSize: 5,
@@ -189,25 +181,16 @@ const rules = {
   deviceName: [
     {
       required: true,
-      message: '请输入',
+      whitespace: true,
+      message: '请输入设备名称',
       trigger: 'blur',
     },
-    {
-      validator: (_rule, value, callback) => {
-        callback(isServiceProduct.value || /^[^\u4e00-\u9fa5]{4,15}$/.test(value)
-          ? undefined : new Error('设备名称需为4~15个非中文字符'));
-      },
-      trigger: 'blur',
-    },
+    { max: 100, message: '设备名称不能超过100个字符', trigger: 'blur' },
   ],
-  nickname: [
-    {
-      required: true,
-      message: '请输入',
-      trigger: 'blur',
-    },
+  nodeId: [
+    { required: true, whitespace: true, message: '请输入设备标识码', trigger: 'blur' },
+    { max: 50, message: '设备标识码不能超过50个字符', trigger: 'blur' },
   ],
-  nodeId: [{ required: true, message: '请输入设备标识码', trigger: 'blur' }],
   productKey: [
     {
       required: true,
@@ -222,10 +205,13 @@ const rules = {
       trigger: 'change',
     },
   ],
-  name: [
+  bindingLocation: [
     {
       required: true,
-      message: '请选择',
+      validator: (_rule, value, callback) => {
+        callback(/^[1-9]\d*$/.test(String(value))
+          ? undefined : new Error(formData.value.locationType === 0 ? '请选择老人' : '请选择楼层、房间或床位'));
+      },
       trigger: 'change',
     },
   ],
@@ -235,7 +221,6 @@ const { queryParams } = toRefs(data);
 const options = ref([]);
 const productModelType = productKey => options.value.find(item => item.productKey === productKey)?.modelType ?? 'legacy';
 const deviceModelType = row => row.nodeId != null ? 'services' : productModelType(row.productKey);
-const isServiceProduct = computed(() => productModelType(formData.value.productKey) === 'services');
 
 //组件挂载完成，自动同步产品列表
 onMounted(() => {
@@ -261,14 +246,19 @@ const getOldList = async (val) => {
     };
   }
 
-  const res = await listElderPageQuery(paginationOld.value); // 获取列表数据
-  // if (res.code === 200) {
-  listOldManData.value = res.rows;
-  listOldManData.value.forEach((ele) => {
-    ele.elderId = ele.id;
-  });
-  paginationOld.value.total = Number(res.total);
-  // }
+  const requestId = ++oldRequestId;
+  oldLoading.value = true;
+  listOldManData.value = [];
+  try {
+    const res = await listElderPageQuery({ ...paginationOld.value });
+    if (requestId !== oldRequestId) return;
+    listOldManData.value = res.rows ?? [];
+    paginationOld.value.total = Number(res.total ?? 0);
+  } catch {
+    if (requestId === oldRequestId) paginationOld.value.total = 0;
+  } finally {
+    if (requestId === oldRequestId) oldLoading.value = false;
+  }
 };
 // 搜索功能
 const handleOldSearch = () => {
@@ -292,20 +282,15 @@ const getOldCurrent = (val) => {
   getOldList();
 };
 // 打开老人弹层
-const handleOpenDialog = (val) => {
-
-  // 打开弹层前判断是否有选择得老人，如果是undefined，老人不提示回显
-  if (val.name === undefined) {
-    formData.value.elderId = undefined;
-  } else {
-    formData.value.elderId = val.elderId;
-  }
+const handleOpenDialog = () => {
   dialogOldVisible.value = true;
   getOldList();
 };
 // 关闭普通列表弹层
 const handleCloseDialog = () => {
   dialogOldVisible.value = false;
+  oldRequestId++;
+  oldLoading.value = false;
   paginationOld.value = {
     pageSize: 5,
     pageNum: 1,
@@ -314,8 +299,13 @@ const handleCloseDialog = () => {
 };
 // 提交普通列表弹层
 const handleSelectOld = (val) => {
-  formData.value.elderId = val.elderId;
-  formData.value.name = val.name;
+  if (val?.id == null) return;
+  selectedElder.value = { id: val.id, name: val.name };
+  formData.value.bindingLocation = String(val.id);
+  formData.value.remark = val.name;
+  formData.value.physicalLocationType = -1;
+  formData.value.deviceDescription = String(val.id);
+  proxy.$refs.deviceRef?.clearValidate('bindingLocation');
 };
 // 取消按钮
 function cancel() {
@@ -325,28 +315,23 @@ function cancel() {
 
 // 表单重置
 function reset() {
-  formOldData.value = {};
+  proxy.resetForm('deviceRef');
+  handleCloseDialog();
+  selectedElder.value = null;
   formData.value = {
     id: null,
     iotId: null,
     bindingLocation: null,
     locationType: 0,
-    physicalLocationType: null,
+    physicalLocationType: -1,
     deviceName: null,
     nodeId: null,
-    nickname: null,
     productKey: null,
     productName: null,
     deviceDescription: null,
-    haveEntranceGuard: null,
-    createTime: null,
-    updateTime: null,
-    createBy: null,
-    updateBy: null,
     remark: null,
   };
   bedValue.value = [];
-  proxy.resetForm('deviceRef');
 }
 
 /** 搜索按钮操作 */
@@ -406,78 +391,48 @@ function handleUpdate(row) {
     formData.value = data;
 
     if (data.locationType === 0) {
-      data.elderId = data.bindingLocation;
-      data.name = data.remark;
+      selectedElder.value = { id: data.bindingLocation, name: data.remark };
     } else if (data.deviceDescription) {
       bedValue.value = data.deviceDescription.split(',');
-      data.localName = bedValue.value;
     }
-    formOldData.value = Object.assign({}, formData.value);
     open.value = true;
     title.value = '修改设备';
   });
 }
 
 /** 提交按钮 */
-function submitForm() {
-  proxy.$refs['deviceRef'].validate((valid) => {
-    if (valid) {
-      const data = formData.value;
-      let params = {
-        deviceName: data.deviceName,
-        locationType: data.locationType,
-        nickname: data.nickname,
-        productKey: data.productKey,
-        productName: data.productName,
-        registerDeviceRequest: {
-          deviceName: data.deviceName,
-          nickname: data.nickname,
-          productKey: data.productKey,
-        },
-      };
-      if (isServiceProduct.value) {
-        params.nodeId = data.nodeId;
-        delete params.nickname;
-        delete params.registerDeviceRequest;
-      }
-      // 如果选择的接入类别是1，需要传楼层房间id
-      if (data.locationType === 1) {
-        params = {
-          ...params,
-          physicalLocationType: bedValue.value.length - 1,
-          bindingLocation: bedValue.value[bedValue.value.length - 1],
-          deviceDescription: bedValue.value.join(),
-          remark: data.remark,
-        };
-      } else {
-        // 否则传老人的id
-        params.deviceDescription = null;
-        params = {
-          ...params,
-          bindingLocation: data.elderId,
-          remark: data.name,
-        };
-      }
-      if (data.id != null) {
-        params = {
-          ...params,
-          id: formData.value.id,
-          iotId: formData.value.iotId,
-        };
-        updateDevice(params).then((response) => {
-          proxy.$modal.msgSuccess('编辑成功');
-          open.value = false;
-          setTime();
-        });
-      } else {
-        addDevice(params).then((response) => {
-          proxy.$modal.msgSuccess('添加成功');
-          open.value = false;
-          setTime();
-        });
-      }
+async function submitForm() {
+  if (submitting.value) return;
+  submitting.value = true;
+  try {
+    const valid = await proxy.$refs.deviceRef.validate().catch(() => false);
+    if (!valid) return;
+    const data = formData.value;
+    // 随身设备用 -1 标识非物理位置，描述保存老人 ID；固定设备保存完整位置路径。
+    const params = {
+      deviceName: data.deviceName.trim(),
+      nodeId: data.nodeId.trim(),
+      productKey: data.productKey,
+      productName: options.value.find(item => item.productKey === data.productKey)?.productName ?? data.productName,
+      locationType: data.locationType,
+      bindingLocation: String(data.bindingLocation),
+      physicalLocationType: data.locationType === 1 ? data.physicalLocationType : -1,
+      deviceDescription: data.locationType === 1 ? data.deviceDescription : String(data.bindingLocation),
+      remark: data.remark,
+    };
+    if (data.id != null) {
+      await updateDevice({ ...params, id: data.id, iotId: data.iotId });
+    } else {
+      await addDevice(params);
     }
-  });
+    proxy.$modal.msgSuccess(data.id != null ? '编辑成功' : '添加成功');
+    open.value = false;
+    setTime();
+  } catch {
+    // 请求错误由统一拦截器提示，保留表单便于重试。
+  } finally {
+    submitting.value = false;
+  }
 }
 
 /** 删除按钮操作 */
@@ -527,68 +482,37 @@ const getAllFloorList = async () => {
 };
 // 选择楼层、房间、床位
 const handleFloor = () => {
-  const valueArr = [];
-  bedValue.value.forEach((eleObj) => {
-    valueArr.push(eleObj.substring(1));
-  });
-  formData.value.localName = valueArr;
-  const data = [];
-  floorData.value.forEach((ele) => {
-    if (ele.value === bedValue.value[0]) {
-      data.push(ele.label);
-      ele.children.forEach((obj) => {
-        if (obj.value === bedValue.value[1]) {
-          data.push(obj.label);
-          obj.children.forEach((val) => {
-            if (val.value === bedValue.value[2]) {
-              data.push(val.label);
-            }
-          });
-        }
-      });
-    }
-  });
-  formData.value.remark = data.join();
+  const path = bedValue.value ?? [];
+  const labels = [];
+  let nodes = floorData.value;
+  for (const value of path) {
+    const node = nodes.find(item => String(item.value) === String(value));
+    if (!node) break;
+    labels.push(node.label);
+    nodes = node.children ?? [];
+  }
+  const valid = path.length > 0 && path.length <= 3 && labels.length === path.length;
+  formData.value.bindingLocation = valid ? String(path[path.length - 1]) : null;
+  formData.value.physicalLocationType = valid ? path.length - 1 : null;
+  formData.value.deviceDescription = valid ? path.join(',') : null;
+  formData.value.remark = valid ? labels.join(',') : null;
 };
 // 选择老人获取相关联的信息
 const selectFlavor = () => {
-  mak.value = true;
-  readonly.value = true;
-  handleOpenDialog(formData.value);
-};
-const outSelect = () => {
-  setTimeout(function () {
-    mak.value = false;
-    readonly.value = false;
-  }, 200);
+  handleOpenDialog();
 };
 
 // 选择接送类别
-const handleRadio = (value) => {
-  const data = formData.value;
-  const oldData = formOldData.value;
-  console.log(oldData, 1);
-  console.log(data, 2);
-  // // 如果接入类型选择的是位置，需要把老人的选项内容清掉
-  if (data.locationType === 1) {
-    // 获取详情要回显的数据
-    if (oldData.deviceDescription) {
-      bedValue.value = oldData.deviceDescription.split(',');
-      delete data.name;
-    }
+const handleRadio = () => {
+  if (formData.value.locationType === 1) {
+    handleFloor();
+  } else {
+    formData.value.bindingLocation = selectedElder.value ? String(selectedElder.value.id) : null;
+    formData.value.remark = selectedElder.value?.name ?? null;
+    formData.value.physicalLocationType = -1;
+    formData.value.deviceDescription = selectedElder.value ? String(selectedElder.value.id) : null;
   }
-
-  // 反之，接入类型选择的是老人，需要把位置的选项内容清掉
-  if (data.locationType === 0) {
-    bedValue.value = [];
-    data.localName = [];
-
-    // 获取详情要回显的数据
-    if (!oldData.deviceDescription) {
-      data.name = oldData.remark;
-      data.elderId = oldData.elderId;
-    }
-  }
+  proxy.$refs.deviceRef?.clearValidate('bindingLocation');
 };
 // 去详情页
 const handleDetails = (row) => {
@@ -600,14 +524,15 @@ const handleDetails = (row) => {
 
 watch(() => formData.value.productKey,
   (val) => {
-    options.value.forEach(item => {
-      if (item.productKey === val) {
-        formData.value.productName = item.productName
-      }
-    })
+    formData.value.productName = options.value.find(item => item.productKey === val)?.productName ?? null;
   }
 );
 </script>
+<style scoped>
+.device-form :deep(.el-form-item__label) {
+  white-space: nowrap;
+}
+</style>
 <style rel="stylesheet/scss">
 .el-cascader-panel .el-radio {
   width: 100%;
